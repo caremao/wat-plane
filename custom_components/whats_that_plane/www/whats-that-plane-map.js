@@ -204,6 +204,12 @@ class WhatsThatPlaneMap extends HTMLElement {
     });
   }
 
+  _escapeHtml(str) {
+    const div = document.createElement('div');
+    div.textContent = str;
+    return div.innerHTML;
+  }
+
   connectedCallback() {
     this.initMap();
   }
@@ -300,7 +306,7 @@ class WhatsThatPlaneMap extends HTMLElement {
     if (flight.origin_latitude && flight.origin_longitude) {
         L.marker([flight.origin_latitude, flight.origin_longitude], { icon: airportIcon('#3CB44B') })
             .addTo(this._airportMarkersLayer)
-            .bindPopup(`<b>Origin:</b><br>${flight.origin_airport_name || 'Unknown'}`);
+            .bindPopup(`<b>Origin:</b><br>${this._escapeHtml(flight.origin_airport_name || 'Unknown')}`);
     } else if (flight.trail && flight.trail.length > 0) {
         const firstPoint = flight.trail[flight.trail.length - 1];
         if (firstPoint.lat && firstPoint.lng) {
@@ -313,7 +319,7 @@ class WhatsThatPlaneMap extends HTMLElement {
     if (flight.destination_latitude && flight.destination_longitude) {
         L.marker([flight.destination_latitude, flight.destination_longitude], { icon: airportIcon('#4363D8') })
             .addTo(this._airportMarkersLayer)
-            .bindPopup(`<b>Destination:</b><br>${flight.destination_airport_name || 'Unknown'}`);
+            .bindPopup(`<b>Destination:</b><br>${this._escapeHtml(flight.destination_airport_name || 'Unknown')}`);
     }
   }
     
