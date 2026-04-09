@@ -217,7 +217,8 @@ class WhatsThatPlaneMap extends HTMLElement {
   }
 
   renderError(error) {
-      this.shadowRoot.innerHTML = `<style>.error { color: var(--error-color, #db4437); background-color: #fff; padding: 16px; }</style><div class="error">${error}</div>`;
+      this.shadowRoot.innerHTML = `<style>.error { color: var(--error-color, #db4437); background-color: #fff; padding: 16px; }</style><div class="error"></div>`;
+      this.shadowRoot.querySelector('.error').textContent = error;
   }
 
   set hass(hass) {
