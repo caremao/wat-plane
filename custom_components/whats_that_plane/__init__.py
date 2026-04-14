@@ -288,6 +288,8 @@ class WhatsThatPlaneCoordinator(DataUpdateCoordinator):
                     }
                     if not flight_details['trail'] or (flight_details['trail'][0]['lat'] != latest_point['lat'] and flight_details['trail'][0]['lng'] != latest_point['lng']):
                         flight_details['trail'].insert(0, latest_point)
+                    if len(flight_details['trail']) > 500:
+                        flight_details['trail'] = flight_details['trail'][:500]
 
                     dpath.util.new(flight_details, 'identification/id', flight.id)
                     dpath.util.new(flight_details, 'identification/callsign', flight.callsign)
