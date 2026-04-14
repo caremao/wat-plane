@@ -3,6 +3,13 @@ from homeassistant import config_entries
 from homeassistant.core import callback
 from .const import DOMAIN
 
+DISTANCE_IMPERIAL = "imperial (miles (mi))"
+DISTANCE_METRIC = "metric (kilometres (km))"
+ALTITUDE_IMPERIAL = "imperial (feet (ft))"
+ALTITUDE_METRIC = "metric (metres (m))"
+SPEED_IMPERIAL = "imperial (miles per hour (mph))"
+SPEED_METRIC = "metric (kilometres per hour (km/h))"
+
 class WhatsThatPlaneConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     VERSION = 1
 
@@ -29,9 +36,14 @@ class WhatsThatPlaneConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             vol.Optional("filter_flight_altitude_ft_maximum", default=60000): vol.All(vol.Coerce(int), vol.Range(min=0)),
             vol.Optional("hold_flight_data_seconds", default=0): vol.All(vol.Coerce(int), vol.Range(min=0)),
             vol.Optional("historic_flights_max_count", default=0): vol.All(vol.Coerce(int), vol.Range(min=0)),
-            vol.Optional("distance_units", default="imperial (miles (mi))"): vol.In(["metric (kilometres (km))", "imperial (miles (mi))"]),
-            vol.Optional("altitude_units", default="imperial (feet (ft))"): vol.In(["metric (metres (m))", "imperial (feet (ft))"]),
-            vol.Optional("speed_units", default="imperial (miles per hour (mph))"): vol.In(["metric (kilometres per hour (km/h))", "imperial (miles per hour (mph))"]),
+            vol.Optional("landing_detection_enabled", default=False): bool,
+            vol.Optional("runway_heading", default=0): vol.All(vol.Coerce(int), vol.Range(min=0, max=360)),
+            vol.Optional("approach_cone_width", default=30): vol.All(vol.Coerce(int), vol.Range(min=1, max=180)),
+            vol.Optional("landing_altitude_max_ft", default=5000): vol.All(vol.Coerce(int), vol.Range(min=100, max=60000)),
+            vol.Optional("landing_speed_max_kts", default=200): vol.All(vol.Coerce(int), vol.Range(min=0, max=999)),
+            vol.Optional("distance_units", default=DISTANCE_IMPERIAL): vol.In([DISTANCE_METRIC, DISTANCE_IMPERIAL]),
+            vol.Optional("altitude_units", default=ALTITUDE_IMPERIAL): vol.In([ALTITUDE_METRIC, ALTITUDE_IMPERIAL]),
+            vol.Optional("speed_units", default=SPEED_IMPERIAL): vol.In([SPEED_METRIC, SPEED_IMPERIAL]),
         })
         return self.async_show_form(step_id="user", data_schema=data_schema)
 
@@ -69,8 +81,13 @@ class WhatsThatPlaneOptionsFlow(config_entries.OptionsFlow):
             vol.Optional("filter_flight_altitude_ft_maximum", default=current_config.get("filter_flight_altitude_ft_maximum", 60000)): vol.All(vol.Coerce(int), vol.Range(min=0)),
             vol.Optional("hold_flight_data_seconds", default=current_config.get("hold_flight_data_seconds", 0)): vol.All(vol.Coerce(int), vol.Range(min=0)),
             vol.Optional("historic_flights_max_count", default=current_config.get("historic_flights_max_count", 0)): vol.All(vol.Coerce(int), vol.Range(min=0)),
-            vol.Optional("distance_units", default=current_config.get("distance_units", "imperial (miles (mi))")): vol.In(["metric (kilometres (km))", "imperial (miles (mi))"]),
-            vol.Optional("altitude_units", default=current_config.get("altitude_units", "imperial (feet (ft))")): vol.In(["metric (metres (m))", "imperial (feet (ft))"]),
-            vol.Optional("speed_units", default=current_config.get("speed_units", "imperial (miles per hour (mph))")): vol.In(["metric (kilometres per hour (km/h))", "imperial (miles per hour (mph))"]),
+            vol.Optional("landing_detection_enabled", default=current_config.get("landing_detection_enabled", False)): bool,
+            vol.Optional("runway_heading", default=current_config.get("runway_heading", 0)): vol.All(vol.Coerce(int), vol.Range(min=0, max=360)),
+            vol.Optional("approach_cone_width", default=current_config.get("approach_cone_width", 30)): vol.All(vol.Coerce(int), vol.Range(min=1, max=180)),
+            vol.Optional("landing_altitude_max_ft", default=current_config.get("landing_altitude_max_ft", 5000)): vol.All(vol.Coerce(int), vol.Range(min=100, max=60000)),
+            vol.Optional("landing_speed_max_kts", default=current_config.get("landing_speed_max_kts", 200)): vol.All(vol.Coerce(int), vol.Range(min=0, max=999)),
+            vol.Optional("distance_units", default=current_config.get("distance_units", DISTANCE_IMPERIAL)): vol.In([DISTANCE_METRIC, DISTANCE_IMPERIAL]),
+            vol.Optional("altitude_units", default=current_config.get("altitude_units", ALTITUDE_IMPERIAL)): vol.In([ALTITUDE_METRIC, ALTITUDE_IMPERIAL]),
+            vol.Optional("speed_units", default=current_config.get("speed_units", SPEED_IMPERIAL)): vol.In([SPEED_METRIC, SPEED_IMPERIAL]),
         })
         return self.async_show_form(step_id="init", data_schema=options_schema)

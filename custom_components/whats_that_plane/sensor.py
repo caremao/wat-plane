@@ -243,6 +243,7 @@ class WhatsThatPlaneSensor(CoordinatorEntity, SensorEntity):
             "arrival_delay_mins": arrival_delay_mins,
 
             "last_seen_time_formatted": last_seen_time_formatted,
+            "is_landing": flight.get("is_landing", False),
         }
 
     @property
@@ -264,6 +265,8 @@ class WhatsThatPlaneSensor(CoordinatorEntity, SensorEntity):
         flights_data = [self._format_flight_data(flight) for flight in visible_flights if flight]
         historic_flights = self.coordinator.historic_flights or []
         historic_flights_data = [self._format_flight_data(flight) for flight in historic_flights if flight]
+        landing_flights = self.coordinator.landing_flights or {}
+        landing_flights_data = [self._format_flight_data(flight) for flight in landing_flights.values() if flight]
 
         config = self.coordinator.config
         config_attributes = {
@@ -275,10 +278,14 @@ class WhatsThatPlaneSensor(CoordinatorEntity, SensorEntity):
             "distance_units": config.get("distance_units", "metric"),
             "altitude_units": config.get("altitude_units", "imperial"),
             "speed_units": config.get("speed_units", "imperial"),
+            "landing_detection_enabled": config.get("landing_detection_enabled", False),
+            "runway_heading": config.get("runway_heading", 0),
+            "approach_cone_width": config.get("approach_cone_width", 30),
         }
 
         self._attr_extra_state_attributes = {
             "config": config_attributes,
             "flights": flights_data,
             "historic_flights": historic_flights_data,
+            "landing_flights": landing_flights_data,
         }

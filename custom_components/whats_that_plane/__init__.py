@@ -1,17 +1,18 @@
+import logging
+import math
 import os
 import shutil
-import logging
-import asyncio
-import math
 import time
-import dpath.util
 from datetime import timedelta
-from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant, ServiceCall, CoreState, Event
-from homeassistant.const import EVENT_HOMEASSISTANT_START
-from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
+
+import dpath.util
 from FlightRadar24 import FlightRadar24API
 from geopy.distance import geodesic
+from homeassistant.config_entries import ConfigEntry
+from homeassistant.const import EVENT_HOMEASSISTANT_START
+from homeassistant.core import HomeAssistant, CoreState, Event
+from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
+
 from .const import DOMAIN
 
 _LOGGER = logging.getLogger(__name__)
@@ -85,7 +86,7 @@ async def register_lovelace_resource(hass, url):
     except Exception as e:
         _LOGGER.error(f"Failed to register Lovelace resource: {e}")
 
-async def async_setup(hass: HomeAssistant, config: dict) -> bool:
+async def async_setup(_hass: HomeAssistant, _config: dict) -> bool:
     return True
 
 
@@ -168,6 +169,7 @@ class WhatsThatPlaneCoordinator(DataUpdateCoordinator):
         update_seconds = self._config.get("update_interval", 60)
         self.fr_api = FlightRadar24API()
         self.tracked_flights = {}
+        self.landing_flights = {}
         self.historic_flights = []
 
         super().__init__(
@@ -197,6 +199,45 @@ class WhatsThatPlaneCoordinator(DataUpdateCoordinator):
         lower_bound = (direction - half_fov) % 360
         upper_bound = (direction + half_fov) % 360
         return lower_bound <= bearing <= upper_bound if lower_bound < upper_bound else bearing >= lower_bound or bearing <= upper_bound
+
+    def _is_descending(self, trail, min_points=3):
+        if not trail or len(trail) < min_points:
+            return False
+        recent = trail[:min_points]
+        altitudes = [p.get('alt') for p in recent if p.get('alt') is not None]
+        if len(altitudes) < min_points:
+            return False
+        oldest_alt = altitudes[-1]
+        newest_alt = altitudes[0]
+        return (oldest_alt - newest_alt) >= 100
+
+    def _is_landing_flight(self, flight_details, flight_bearing):
+        config = self.config
+        if not config.get("landing_detection_enabled", False):
+            return False
+        runway_heading = config.get("runway_heading", 0)
+        approach_cone_width = config.get("approach_cone_width", 30)
+        landing_alt_max = config.get("landing_altitude_max_ft", 5000)
+        landing_speed_max = config.get("landing_speed_max_kts", 200)
+
+        reciprocal = (runway_heading + 180) % 360
+        if not (self._is_within_fov(flight_bearing, runway_heading, approach_cone_width) or
+                self._is_within_fov(flight_bearing, reciprocal, approach_cone_width)):
+            return False
+
+        raw_alt = flight_details.get('altitude_ft_raw', 0)
+        if raw_alt > landing_alt_max:
+            return False
+
+        if not self._is_descending(flight_details.get('trail', [])):
+            return False
+
+        if landing_speed_max > 0:
+            speed_kts = flight_details.get('ground_speed_kts', 0)
+            if speed_kts > landing_speed_max:
+                return False
+
+        return True
 
     async def _async_update_data(self):
         try:
@@ -239,19 +280,23 @@ class WhatsThatPlaneCoordinator(DataUpdateCoordinator):
                 if self._is_within_fov(flight_bearing, config["facing_direction"], config["fov_cone"]):
                     currently_visible_ids.add(flight_id)
 
-                    if flight_id not in self.tracked_flights:
+                    if flight_id in self.landing_flights:
+                        flight_details = self.landing_flights[flight_id]["data"]
+                    elif flight_id in self.tracked_flights:
+                        flight_details = self.tracked_flights[flight_id]["data"]
+                    else:
                         _LOGGER.debug(f"New flight in FOV: {flight_id}")
                         try:
                             flight_details = await self.hass.async_add_executor_job(self.fr_api.get_flight_details, flight)
-                        except (ConnectionError, TimeoutError, OSError, ValueError) as e:
+                        except (OSError, ValueError) as e:
                             _LOGGER.warning(f"Could not fetch details for {flight_id}: {e}")
                             flight_details = {}
                         self.tracked_flights[flight_id] = {"data": flight_details}
-                    else:
-                        flight_details = self.tracked_flights[flight_id]["data"]
 
                     flight_details['latitude'] = flight.latitude
                     flight_details['longitude'] = flight.longitude
+
+                    flight_details['altitude_ft_raw'] = flight.altitude if flight.altitude is not None else 0
 
                     if flight.altitude is not None:
                         if altitude_units.startswith('metric'):
@@ -292,13 +337,17 @@ class WhatsThatPlaneCoordinator(DataUpdateCoordinator):
                     dpath.util.new(flight_details, 'identification/id', flight.id)
                     dpath.util.new(flight_details, 'identification/callsign', flight.callsign)
                     
-                    origin_position = (dpath.util.get(flight_details, ORIGIN_LATITUDE, default=None), dpath.util.get(flight_details, ORIGIN_LONGITUDE, default=None))
-                    destination_position = (dpath.util.get(flight_details, DESTINATION_LATITUDE, default=None), dpath.util.get(flight_details, DESTINATION_LONGITUDE, default=None))
-                    current_position = (flight.latitude, flight.longitude)
-                    
+                    origin_lat = dpath.util.get(flight_details, ORIGIN_LATITUDE, default=None)
+                    origin_lng = dpath.util.get(flight_details, ORIGIN_LONGITUDE, default=None)
+                    dest_lat = dpath.util.get(flight_details, DESTINATION_LATITUDE, default=None)
+                    dest_lng = dpath.util.get(flight_details, DESTINATION_LONGITUDE, default=None)
+
                     total_distance, distance_traveled, progress_percent = 0, 0, 0
 
-                    if all(position is not None for position in origin_position) and all(position is not None for position in destination_position) and all(position is not None for position in current_position):
+                    if origin_lat is not None and origin_lng is not None and dest_lat is not None and dest_lng is not None and flight.latitude is not None and flight.longitude is not None:
+                        origin_position = (origin_lat, origin_lng)
+                        destination_position = (dest_lat, dest_lng)
+                        current_position = (flight.latitude, flight.longitude)
                         total_dist_val_km = geodesic(origin_position, destination_position).km
                         distance_traveled_val_km = geodesic(origin_position, current_position).km
                         
@@ -316,10 +365,28 @@ class WhatsThatPlaneCoordinator(DataUpdateCoordinator):
                     flight_details['distance_traveled'] = distance_traveled
                     flight_details['progress_percent'] = progress_percent
                     
-                    self.tracked_flights[flight_id]["last_seen"] = time.time()
+                    if flight_id in self.landing_flights:
+                        self.landing_flights[flight_id]["last_seen"] = time.time()
+                    elif flight_id in self.tracked_flights:
+                        self.tracked_flights[flight_id]["last_seen"] = time.time()
+
+                    flight_details['is_landing'] = self._is_landing_flight(
+                        flight_details, flight_bearing
+                    )
+
+            if config.get("landing_detection_enabled", False):
+                for flight_id in currently_visible_ids:
+                    if flight_id in self.tracked_flights:
+                        flight_info = self.tracked_flights[flight_id]
+                        if flight_info["data"].get("is_landing", False):
+                            self.landing_flights[flight_id] = self.tracked_flights.pop(flight_id)
+                    elif flight_id in self.landing_flights:
+                        if not self.landing_flights[flight_id]["data"].get("is_landing", False):
+                            self.tracked_flights[flight_id] = self.landing_flights.pop(flight_id)
 
             expired_flight_ids = []
-            for flight_id, flight_info in self.tracked_flights.items():
+            all_active = {**self.tracked_flights, **self.landing_flights}
+            for flight_id, flight_info in all_active.items():
                 if flight_id not in currently_visible_ids:
                     if time.time() - flight_info.get("last_seen", 0) > hold_seconds:
                         _LOGGER.debug(f"Flight {flight_id} has expired and will be removed.")
@@ -330,6 +397,9 @@ class WhatsThatPlaneCoordinator(DataUpdateCoordinator):
                 if flight_id in self.tracked_flights:
                     self.historic_flights.insert(0, self.tracked_flights[flight_id])
                     del self.tracked_flights[flight_id]
+                elif flight_id in self.landing_flights:
+                    self.historic_flights.insert(0, self.landing_flights[flight_id])
+                    del self.landing_flights[flight_id]
 
             if len(self.historic_flights) > historic_max_count:
                 self.historic_flights = self.historic_flights[:historic_max_count]
