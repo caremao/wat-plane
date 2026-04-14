@@ -449,7 +449,8 @@ class WhatsThatPlaneMap extends HTMLElement {
             this._map.invalidateSize();
         });
 
-        const savedLayers = JSON.parse(localStorage.getItem('whats-that-plane-layers')) || {};
+        let savedLayers = {};
+        try { savedLayers = JSON.parse(localStorage.getItem('whats-that-plane-layers')) || {}; } catch (e) { savedLayers = {}; }
         const getLayerState = (layerName, defaultState) => savedLayers[layerName] === undefined ? defaultState : savedLayers[layerName];
 
         this._locationLayer = L.layerGroup();
@@ -505,7 +506,8 @@ class WhatsThatPlaneMap extends HTMLElement {
   }
 
   _saveLayerState(layerName, isVisible) {
-      const savedLayers = JSON.parse(localStorage.getItem('whats-that-plane-layers')) || {};
+      let savedLayers = {};
+      try { savedLayers = JSON.parse(localStorage.getItem('whats-that-plane-layers')) || {}; } catch (e) { savedLayers = {}; }
       savedLayers[layerName] = isVisible;
       localStorage.setItem('whats-that-plane-layers', JSON.stringify(savedLayers));
   }
