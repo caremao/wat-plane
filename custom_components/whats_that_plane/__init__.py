@@ -1,17 +1,18 @@
+import logging
+import math
 import os
 import shutil
-import logging
-import asyncio
-import math
 import time
-import dpath.util
 from datetime import timedelta
-from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant, ServiceCall, CoreState, Event
-from homeassistant.const import EVENT_HOMEASSISTANT_START
-from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
+
+import dpath.util
 from FlightRadar24 import FlightRadar24API
 from geopy.distance import geodesic
+from homeassistant.config_entries import ConfigEntry
+from homeassistant.const import EVENT_HOMEASSISTANT_START
+from homeassistant.core import HomeAssistant, ServiceCall, CoreState, Event
+from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
+
 from .const import DOMAIN
 
 _LOGGER = logging.getLogger(__name__)
@@ -20,6 +21,7 @@ ORIGIN_LATITUDE = 'airport/origin/position/latitude'
 ORIGIN_LONGITUDE = 'airport/origin/position/longitude'
 DESTINATION_LATITUDE = 'airport/destination/position/latitude'
 DESTINATION_LONGITUDE = 'airport/destination/position/longitude'
+
 
 def setup_frontend_files(hass: HomeAssistant) -> None:
     source_dir = os.path.join(os.path.dirname(__file__), 'www')
@@ -57,6 +59,7 @@ def setup_frontend_files(hass: HomeAssistant) -> None:
             except OSError as e:
                 _LOGGER.error(f"Failed to copy {filename}: {e}")
 
+
 async def register_lovelace_resource(hass, url):
     lovelace = hass.data.get("lovelace")
     if lovelace is None:
@@ -84,6 +87,7 @@ async def register_lovelace_resource(hass, url):
         })
     except Exception as e:
         _LOGGER.error(f"Failed to register Lovelace resource: {e}")
+
 
 async def async_setup(hass: HomeAssistant, config: dict) -> bool:
     return True
@@ -116,8 +120,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     entry.async_on_unload(entry.add_update_listener(update_listener))
     return True
 
+
 async def update_listener(hass: HomeAssistant, entry: ConfigEntry) -> None:
     await hass.config_entries.async_reload(entry.entry_id)
+
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     if len(hass.config_entries.async_entries(DOMAIN)) == 1:
@@ -133,18 +139,20 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         hass.data[DOMAIN].pop(entry.entry_id)
     return unload_ok
 
+
 def remove_frontend_files(hass: HomeAssistant) -> None:
     destination_dir = hass.config.path(f"www/community/{DOMAIN}")
     if os.path.exists(destination_dir):
         shutil.rmtree(destination_dir)
         _LOGGER.info(f"Removed www directory at {destination_dir}")
 
+
 async def async_remove_lovelace_resource(hass: HomeAssistant, url: str):
     lovelace = hass.data.get("lovelace")
     if lovelace and hasattr(lovelace, "resources"):
         resources = lovelace.resources
         resource_to_remove = next((res for res in resources.async_items() if res["url"] == url), None)
-        
+
         if resource_to_remove:
             try:
                 await resources.async_delete_item(resource_to_remove["id"])
@@ -153,6 +161,7 @@ async def async_remove_lovelace_resource(hass: HomeAssistant, url: str):
                 _LOGGER.error(f"Failed to remove Lovelace resource: {e}")
         else:
             _LOGGER.warning(f"Could not find Lovelace resource to remove: {url}")
+
 
 class WhatsThatPlaneCoordinator(DataUpdateCoordinator):
     def __init__(self, hass: HomeAssistant, entry: ConfigEntry | None = None, config: dict | None = None):
@@ -186,7 +195,8 @@ class WhatsThatPlaneCoordinator(DataUpdateCoordinator):
         your_latitude = math.radians(your_latitude)
         flight_latitude = math.radians(flight_latitude)
         y = math.sin(delta_longitude) * math.cos(flight_latitude)
-        x = math.cos(your_latitude) * math.sin(flight_latitude) - math.sin(your_latitude) * math.cos(flight_latitude) * math.cos(delta_longitude)
+        x = math.cos(your_latitude) * math.sin(flight_latitude) - math.sin(your_latitude) * math.cos(
+            flight_latitude) * math.cos(delta_longitude)
         initial_bearing = math.atan2(y, x)
         return (math.degrees(initial_bearing) + 360) % 360
 
@@ -211,7 +221,6 @@ class WhatsThatPlaneCoordinator(DataUpdateCoordinator):
             altitude_units = config.get("altitude_units", "imperial (feet (ft))")
             speed_units = config.get("speed_units", "imperial (miles per hour (mph))")
 
-
             bounds = await self.hass.async_add_executor_job(
                 self.fr_api.get_bounds_by_point, your_latitude, your_longitude, radius_km
             )
@@ -234,7 +243,8 @@ class WhatsThatPlaneCoordinator(DataUpdateCoordinator):
                 if not (minimum_altitude <= flight_altitude_for_filter <= maximum_altitude):
                     continue
 
-                flight_bearing = self._calculate_bearing(your_latitude, your_longitude, flight.latitude, flight.longitude)
+                flight_bearing = self._calculate_bearing(your_latitude, your_longitude, flight.latitude,
+                                                         flight.longitude)
 
                 if self._is_within_fov(flight_bearing, config["facing_direction"], config["fov_cone"]):
                     currently_visible_ids.add(flight_id)
@@ -242,7 +252,8 @@ class WhatsThatPlaneCoordinator(DataUpdateCoordinator):
                     if flight_id not in self.tracked_flights:
                         _LOGGER.debug(f"New flight in FOV: {flight_id}")
                         try:
-                            flight_details = await self.hass.async_add_executor_job(self.fr_api.get_flight_details, flight)
+                            flight_details = await self.hass.async_add_executor_job(self.fr_api.get_flight_details,
+                                                                                    flight)
                         except (ConnectionError, TimeoutError, OSError, ValueError) as e:
                             _LOGGER.warning(f"Could not fetch details for {flight_id}: {e}")
                             flight_details = {}
@@ -272,7 +283,7 @@ class WhatsThatPlaneCoordinator(DataUpdateCoordinator):
                     else:
                         flight_details['ground_speed_kts'] = 0
                         flight_details['ground_speed'] = 0
-                        
+
                     flight_details['callsign'] = flight.callsign
 
                     if 'trail' not in flight_details:
@@ -286,22 +297,28 @@ class WhatsThatPlaneCoordinator(DataUpdateCoordinator):
                         "hd": flight.heading,
                         "ts": int(time.time())
                     }
-                    if not flight_details['trail'] or (flight_details['trail'][0]['lat'] != latest_point['lat'] and flight_details['trail'][0]['lng'] != latest_point['lng']):
+                    if not flight_details['trail'] or (
+                            flight_details['trail'][0]['lat'] != latest_point['lat'] and flight_details['trail'][0][
+                        'lng'] != latest_point['lng']):
                         flight_details['trail'].insert(0, latest_point)
 
                     dpath.util.new(flight_details, 'identification/id', flight.id)
                     dpath.util.new(flight_details, 'identification/callsign', flight.callsign)
-                    
-                    origin_position = (dpath.util.get(flight_details, ORIGIN_LATITUDE, default=None), dpath.util.get(flight_details, ORIGIN_LONGITUDE, default=None))
-                    destination_position = (dpath.util.get(flight_details, DESTINATION_LATITUDE, default=None), dpath.util.get(flight_details, DESTINATION_LONGITUDE, default=None))
+
+                    origin_position = (dpath.util.get(flight_details, ORIGIN_LATITUDE, default=None),
+                                       dpath.util.get(flight_details, ORIGIN_LONGITUDE, default=None))
+                    destination_position = (dpath.util.get(flight_details, DESTINATION_LATITUDE, default=None),
+                                            dpath.util.get(flight_details, DESTINATION_LONGITUDE, default=None))
                     current_position = (flight.latitude, flight.longitude)
-                    
+
                     total_distance, distance_traveled, progress_percent = 0, 0, 0
 
-                    if all(position is not None for position in origin_position) and all(position is not None for position in destination_position) and all(position is not None for position in current_position):
+                    if all(position is not None for position in origin_position) and all(
+                            position is not None for position in destination_position) and all(
+                            position is not None for position in current_position):
                         total_dist_val_km = geodesic(origin_position, destination_position).km
                         distance_traveled_val_km = geodesic(origin_position, current_position).km
-                        
+
                         if distance_units.startswith('imperial'):
                             total_distance = round(total_dist_val_km * 0.621371)
                             distance_traveled = round(distance_traveled_val_km * 0.621371)
@@ -311,11 +328,11 @@ class WhatsThatPlaneCoordinator(DataUpdateCoordinator):
 
                         if total_distance > 0:
                             progress_percent = min(round((distance_traveled / total_distance) * 100), 100)
-                    
+
                     flight_details['total_distance'] = total_distance
                     flight_details['distance_traveled'] = distance_traveled
                     flight_details['progress_percent'] = progress_percent
-                    
+
                     self.tracked_flights[flight_id]["last_seen"] = time.time()
 
             expired_flight_ids = []
