@@ -254,56 +254,56 @@ COUNTRY_CODE_MAP = {
 
 TIMEZONE_ABBREVIATION_MAP = {
     # Africa
-    "Africa/Algiers":      "CET",   # Central European Time
-    "Africa/Cairo":        "EET",   # Eastern European Time
-    "Africa/Casablanca":   "WEST",  # Western European Summer Time
+    "Africa/Algiers": "CET",  # Central European Time
+    "Africa/Cairo": "EET",  # Eastern European Time
+    "Africa/Casablanca": "WEST",  # Western European Summer Time
     "Africa/Johannesburg": "SAST",  # South Africa Standard Time
-    "Africa/Lagos":        "WAT",   # West Africa Time
-    "Africa/Nairobi":      "EAT",   # East Africa Time
+    "Africa/Lagos": "WAT",  # West Africa Time
+    "Africa/Nairobi": "EAT",  # East Africa Time
 
     # America
-    "America/Bogota":      "COT",   # Colombia Time
-    "America/Caracas":     "VET",   # Venezuelan Standard Time
-    "America/Guayaquil":   "ECT",   # Ecuador Time
-    "America/La_Paz":      "BOT",   # Bolivia Time
-    "America/Lima":        "PET",   # Peru Time
-    "America/Panama":      "EST",   # Eastern Standard Time
+    "America/Bogota": "COT",  # Colombia Time
+    "America/Caracas": "VET",  # Venezuelan Standard Time
+    "America/Guayaquil": "ECT",  # Ecuador Time
+    "America/La_Paz": "BOT",  # Bolivia Time
+    "America/Lima": "PET",  # Peru Time
+    "America/Panama": "EST",  # Eastern Standard Time
 
     # Asia
-    "Asia/Almaty":         "ALMT",  # Alma-Ata Time
-    "Asia/Baghdad":        "AST",   # Arabia Standard Time
-    "Asia/Bangkok":        "ICT",   # Indochina Time
-    "Asia/Colombo":        "IST",   # India Standard Time
-    "Asia/Dhaka":          "BST",   # Bangladesh Standard Time
-    "Asia/Dubai":          "GST",   # Gulf Standard Time
-    "Asia/Ho_Chi_Minh":    "ICT",   # Indochina Time
-    "Asia/Hong_Kong":      "HKT",   # Hong Kong Time
-    "Asia/Jakarta":        "WIB",   # Western Indonesian Time
-    "Asia/Karachi":        "PKT",   # Pakistan Standard Time
-    "Asia/Kathmandu":      "NPT",   # Nepal Time
-    "Asia/Kolkata":        "IST",   # India Standard Time
-    "Asia/Kuala_Lumpur":   "MYT",   # Malaysia Time
-    "Asia/Kuwait":         "AST",   # Arabia Standard Time
-    "Asia/Manila":         "PHT",   # Philippine Time
-    "Asia/Qatar":          "AST",   # Arabia Standard Time
-    "Asia/Riyadh":         "AST",   # Arabia Standard Time
-    "Asia/Shanghai":       "CST",   # China Standard Time
-    "Asia/Singapore":      "SGT",   # Singapore Time
-    "Asia/Tehran":         "IRST",  # Iran Standard Time
-    "Asia/Tashkent":       "UZT",   # Uzbekistan Time
+    "Asia/Almaty": "ALMT",  # Alma-Ata Time
+    "Asia/Baghdad": "AST",  # Arabia Standard Time
+    "Asia/Bangkok": "ICT",  # Indochina Time
+    "Asia/Colombo": "IST",  # India Standard Time
+    "Asia/Dhaka": "BST",  # Bangladesh Standard Time
+    "Asia/Dubai": "GST",  # Gulf Standard Time
+    "Asia/Ho_Chi_Minh": "ICT",  # Indochina Time
+    "Asia/Hong_Kong": "HKT",  # Hong Kong Time
+    "Asia/Jakarta": "WIB",  # Western Indonesian Time
+    "Asia/Karachi": "PKT",  # Pakistan Standard Time
+    "Asia/Kathmandu": "NPT",  # Nepal Time
+    "Asia/Kolkata": "IST",  # India Standard Time
+    "Asia/Kuala_Lumpur": "MYT",  # Malaysia Time
+    "Asia/Kuwait": "AST",  # Arabia Standard Time
+    "Asia/Manila": "PHT",  # Philippine Time
+    "Asia/Qatar": "AST",  # Arabia Standard Time
+    "Asia/Riyadh": "AST",  # Arabia Standard Time
+    "Asia/Shanghai": "CST",  # China Standard Time
+    "Asia/Singapore": "SGT",  # Singapore Time
+    "Asia/Tehran": "IRST",  # Iran Standard Time
+    "Asia/Tashkent": "UZT",  # Uzbekistan Time
 
     # Atlantic
-    "Atlantic/Cape_Verde": "CVT",   # Cape Verde Time
+    "Atlantic/Cape_Verde": "CVT",  # Cape Verde Time
 
     # Europe
-    "Europe/Istanbul":     "EEST",  # Eastern European Summer Time
-    "Europe/Moscow":       "MSK",   # Moscow Standard Time
+    "Europe/Istanbul": "EEST",  # Eastern European Summer Time
+    "Europe/Moscow": "MSK",  # Moscow Standard Time
 
     # Indian
-    "Indian/Cocos":        "CCT",   # Cocos Islands Time
-    "Indian/Kerguelen":    "TFT",   # French Southern and Antarctic Time
-    "Indian/Maldives":     "MVT",   # Maldives Time
-    "Indian/Mauritius":    "MUT",   # Mauritius Time
-    "Indian/Reunion":      "RET",   # Réunion Time
-    "Indian/Seychelles":   "SCT",   # Seychelles Time
+    "Indian/Cocos": "CCT",  # Cocos Islands Time
+    "Indian/Kerguelen": "TFT",  # French Southern and Antarctic Time
+    "Indian/Maldives": "MVT",  # Maldives Time
+    "Indian/Mauritius": "MUT",  # Mauritius Time
+    "Indian/Reunion": "RET",  # Réunion Time
+    "Indian/Seychelles": "SCT",  # Seychelles Time
 }

@@ -1,11 +1,13 @@
-import dpath.util
 from datetime import datetime, timezone
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+
+import dpath.util
 from homeassistant.components.sensor import SensorEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
+
 from .const import DOMAIN, COUNTRY_CODE_MAP, TIMEZONE_ABBREVIATION_MAP
 
 CALLSIGN = 'identification/callsign'
@@ -56,9 +58,9 @@ TIME_REAL_ARRIVAL = 'time/real/arrival'
 
 
 async def async_setup_entry(
-    hass: HomeAssistant,
-    entry: ConfigEntry,
-    async_add_entities: AddEntitiesCallback,
+        hass: HomeAssistant,
+        entry: ConfigEntry,
+        async_add_entities: AddEntitiesCallback,
 ) -> None:
     coordinator = hass.data[DOMAIN][entry.entry_id]
     async_add_entities([WhatsThatPlaneSensor(coordinator)])
