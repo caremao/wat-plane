@@ -243,7 +243,7 @@ class WhatsThatPlaneCoordinator(DataUpdateCoordinator):
                         _LOGGER.debug(f"New flight in FOV: {flight_id}")
                         try:
                             flight_details = await self.hass.async_add_executor_job(self.fr_api.get_flight_details, flight)
-                        except Exception as e:
+                        except (ConnectionError, TimeoutError, OSError, ValueError) as e:
                             _LOGGER.warning(f"Could not fetch details for {flight_id}: {e}")
                             flight_details = {}
                         self.tracked_flights[flight_id] = {"data": flight_details}
