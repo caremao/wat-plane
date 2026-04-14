@@ -11,6 +11,8 @@ class WhatsThatPlaneMap extends HTMLElement {
     this._selectedFlight = null;
     this._locationMarker = null;
     this._fovCone = null;
+    this._approachCones = null;
+    this._landingFlightsLayer = null;
     this._updateTimer = null;
     this.goldenRatioConjugate = 0.61803398875;
     this.hue = Math.random();
@@ -131,6 +133,18 @@ class WhatsThatPlaneMap extends HTMLElement {
             border-radius: 4px;
             background-clip: padding-box;
         }
+        .landing-badge {
+            display: none;
+            background-color: #FF4500;
+            color: #fff;
+            font-size: 10px;
+            font-weight: bold;
+            padding: 2px 6px;
+            border-radius: 3px;
+            margin-right: 4px;
+            vertical-align: middle;
+        }
+        .landing-badge.visible { display: inline; }
         .lds-ring { display: inline-block; position: relative; width: 80px; height: 80px; }
         .lds-ring div { box-sizing: border-box; display: block; position: absolute; width: 64px; height: 64px; margin: 8px; border: 8px solid var(--primary-text-color); border-radius: 50%; animation: lds-ring 1.2s cubic-bezier(0.5, 0, 0.5, 1) infinite; border-color: var(--primary-text-color) transparent transparent transparent; }
         .lds-ring div:nth-child(1) { animation-delay: -0.45s; }
@@ -149,6 +163,7 @@ class WhatsThatPlaneMap extends HTMLElement {
                 <span class="zoom-icon" id="zoom-to-flight" title="Recenter on flight" style="display: inline-block; vertical-align: middle;">
                   <svg viewBox="0 0 24 24" width="20" height="20"><path fill="currentColor" d="M12,8A4,4 0 0,0 8,12A4,4 0 0,0 12,16A4,4 0 0,0 16,12A4,4 0 0,0 12,8M3.05,13H1V11H3.05C3.5,6.83 6.83,3.5 11,3.05V1H13V3.05C17.17,3.5 20.5,6.83 20.95,11H23V13H20.95C20.5,17.17 17.17,20.5 13,20.95V23H11V20.95C6.83,20.5 3.5,17.17 3.05,13M12,5A7,7 0 0,0 5,12A7,7 0 0,0 12,19A7,7 0 0,0 19,12A7,7 0 0,0 12,5Z" /></svg>
                 </span>
+                <span id="info-card-landing-badge" class="landing-badge">LANDING</span>
                 <span id="info-card-airline"></span>
                 <a id="info-card-flight-link" href="#" target="_blank" style="color: #4363d8;"></a>
                 <span id="info-card-route"></span>
@@ -181,6 +196,11 @@ class WhatsThatPlaneMap extends HTMLElement {
               <span class="zoom-icon" id="zoom-to-destination" title="Zoom to destination">
                 <svg viewBox="0 0 24 24"><path fill="currentColor" d="M9.5,3A6.5,6.5 0 0,1 16,9.5C16,11.11 15.41,12.59 14.44,13.73L14.71,14H15.5L21.5,20L20,21.5L14,15.5V14.71L13.73,14.44C12.59,15.41 11.11,16 9.5,16A6.5,6.5 0 0,1 3,9.5A6.5,6.5 0 0,1 9.5,3M9.5,5C7,5 5,7 5,9.5C5,12 7,14 9.5,14C12,14 14,12 14,9.5C14,7 12,5 9.5,5Z" /></svg>
               </span>
+            </div>
+            <div id="info-card-landing-details" style="display: none; margin-top: 6px; padding-top: 6px; border-top: 1px solid #eee;">
+              <div class="detail-row"><span><b>Alt:</b> <span id="info-card-altitude"></span></span></div>
+              <div class="detail-row"><span><b>Speed:</b> <span id="info-card-speed"></span></span></div>
+              <div class="detail-row"><span><b>ETA:</b> <span id="info-card-eta"></span></span></div>
             </div>
           </div>
         </div>
@@ -348,6 +368,26 @@ class WhatsThatPlaneMap extends HTMLElement {
     this.shadowRoot.getElementById('info-card-origin-details').textContent = ` ${origin_city || 'None'}, ${origin_country || 'None'}`;
     this.shadowRoot.getElementById('info-card-dest-emoji').textContent = destination_flag_emoji || '';
     this.shadowRoot.getElementById('info-card-dest-details').textContent = ` ${destination_city || 'None'}, ${destination_country || 'None'}`;
+
+    const badge = this.shadowRoot.getElementById('info-card-landing-badge');
+    const landingDetails = this.shadowRoot.getElementById('info-card-landing-details');
+    if (flight.is_landing) {
+      badge.classList.add('visible');
+      landingDetails.style.display = 'block';
+
+      const config = this._state && this._state.attributes && this._state.attributes.config;
+      const altUnits = config && config.altitude_units || 'imperial';
+      const spdUnits = config && config.speed_units || 'imperial';
+      const altLabel = altUnits.startsWith('metric') ? 'm' : 'ft';
+      const spdLabel = spdUnits.startsWith('metric') ? 'km/h' : 'mph';
+
+      this.shadowRoot.getElementById('info-card-altitude').textContent = flight.altitude != null ? `${flight.altitude} ${altLabel}` : 'N/A';
+      this.shadowRoot.getElementById('info-card-speed').textContent = flight.ground_speed != null ? `${flight.ground_speed} ${spdLabel}` : 'N/A';
+      this.shadowRoot.getElementById('info-card-eta').textContent = flight.estimated_arrival_time_local || 'N/A';
+    } else {
+      badge.classList.remove('visible');
+      landingDetails.style.display = 'none';
+    }
   }
   
   _setInfoCardCollapsed(isCollapsed) {
@@ -455,11 +495,13 @@ class WhatsThatPlaneMap extends HTMLElement {
 
         this._locationLayer = L.layerGroup();
         this._visibleFlightsLayer = L.layerGroup();
+        this._landingFlightsLayer = L.layerGroup();
         this._historicFlightsLayer = L.layerGroup();
         this._airportMarkersLayer = L.layerGroup();
 
         const overlayMaps = {
             "Visible Flights": this._visibleFlightsLayer,
+            "Landing Flights": this._landingFlightsLayer,
             "Historic Flights": this._historicFlightsLayer,
             "My Location & FOV": this._locationLayer,
             "Flight Origin / Destination": this._airportMarkersLayer
@@ -578,10 +620,24 @@ class WhatsThatPlaneMap extends HTMLElement {
 
     const fovPoints = this._calculateFovCone(config.latitude, config.longitude, config.facing_direction, config.fov_cone, config.radius_km);
     this._fovCone = L.polygon(fovPoints, { color: 'green', fillOpacity: 0.05, opacity: 0.3, interactive: false }).addTo(this._locationLayer);
+
+    if (config.landing_detection_enabled) {
+      const rwyHdg = config.runway_heading || 0;
+      const coneWidth = config.approach_cone_width || 30;
+      const reciprocal = (rwyHdg + 180) % 360;
+      const coneStyle = { color: '#FF8C00', fillOpacity: 0.08, opacity: 0.5, interactive: false, dashArray: '8, 4' };
+      const cone1 = this._calculateFovCone(config.latitude, config.longitude, rwyHdg, coneWidth, config.radius_km);
+      const cone2 = this._calculateFovCone(config.latitude, config.longitude, reciprocal, coneWidth, config.radius_km);
+      this._approachCones = [
+        L.polygon(cone1, coneStyle).addTo(this._locationLayer),
+        L.polygon(cone2, coneStyle).addTo(this._locationLayer)
+      ];
+    }
   }
 
   drawFlightElements() {
     this._visibleFlightsLayer.clearLayers();
+    this._landingFlightsLayer.clearLayers();
     this._historicFlightsLayer.clearLayers();
     this._planeMarkers = {};
     this._planePaths = {};
@@ -599,9 +655,10 @@ class WhatsThatPlaneMap extends HTMLElement {
     };
 
     processFlights(this._state.attributes.flights, 'visible');
+    processFlights(this._state.attributes.landing_flights, 'landing');
     processFlights(this._state.attributes.historic_flights, 'historic');
-    
-    const allFlights = (this._state.attributes.flights || []).concat(this._state.attributes.historic_flights || []);
+
+    const allFlights = (this._state.attributes.flights || []).concat(this._state.attributes.landing_flights || []).concat(this._state.attributes.historic_flights || []);
     const allFlightIds = new Set(allFlights.map(f => f.flight_id || f.callsign));
 
     if (this._selectedFlightId && !allFlightIds.has(this._selectedFlightId)) {
@@ -716,8 +773,11 @@ class WhatsThatPlaneMap extends HTMLElement {
       if (!flight.latitude || !flight.longitude) return;
 
       const flightId = flight.flight_id || flight.callsign;
-      const layer = (type === 'visible') ? this._visibleFlightsLayer : this._historicFlightsLayer;
-      const uniqueColor = this._getFlightColor(flightId);
+      let layer;
+      if (type === 'visible') layer = this._visibleFlightsLayer;
+      else if (type === 'landing') layer = this._landingFlightsLayer;
+      else layer = this._historicFlightsLayer;
+      const uniqueColor = (type === 'landing') ? '#FF4500' : this._getFlightColor(flightId);
       
       const clickHandler = (e) => {
           L.DomEvent.stopPropagation(e);
