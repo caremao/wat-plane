@@ -7,6 +7,7 @@ from datetime import timedelta
 
 import dpath.util
 from FlightRadar24 import FlightRadar24API
+from FlightRadarAPI.errors import FlightRadarError
 from geopy.distance import geodesic
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import EVENT_HOMEASSISTANT_START
@@ -21,6 +22,20 @@ ORIGIN_LATITUDE = 'airport/origin/position/latitude'
 ORIGIN_LONGITUDE = 'airport/origin/position/longitude'
 DESTINATION_LATITUDE = 'airport/destination/position/latitude'
 DESTINATION_LONGITUDE = 'airport/destination/position/longitude'
+# After a failed feed request, stop polling FR24 for a while (doubling up to the max) instead of
+# hammering it every update_interval; repeated polling keeps a 429 rate limit from ever clearing.
+FEED_BACKOFF_MIN_SECONDS = 60
+FEED_BACKOFF_MAX_SECONDS = 900
+# Successful feed requests in a row before the backoff memory resets; a flapping 429 keeps escalating instead.
+FEED_BACKOFF_RESET_SUCCESSES = 5
+# Wait before retrying a flight whose details lookup failed.
+DETAILS_RETRY_SECONDS = 60
+# Errors a details lookup may raise: curl_cffi request errors are OSError, bad JSON is ValueError,
+# and FlightRadarAPI's own errors (e.g. CloudflareError) derive from FlightRadarError.
+DETAILS_ERRORS = (OSError, ValueError, FlightRadarError)
+# Versioned so browsers fetch the new map card after an upgrade (bump whenever the map JS changes).
+MAP_JS_PATH = f"/local/community/{DOMAIN}/whats-that-plane-map.js"
+MAP_JS_URL = f"{MAP_JS_PATH}?v=1.3.0"
 
 
 def setup_frontend_files(hass: HomeAssistant) -> None:
@@ -75,9 +90,19 @@ async def register_lovelace_resource(hass, url):
         _LOGGER.warning("Lovelace resources is None.")
         return
 
-    if any(res["url"] == url for res in resources.async_items()):
-        _LOGGER.info(f"Lovelace resource '{url}' is already registered.")
-        return
+    base_path = url.split("?")[0]
+    for res in resources.async_items():
+        if res["url"] == url:
+            _LOGGER.info(f"Lovelace resource '{url}' is already registered.")
+            return
+        if res["url"].split("?")[0] == base_path:
+            # Same script, older version: update in place so the card is never defined twice.
+            _LOGGER.info(f"Updating Lovelace resource {res['url']} -> {url}")
+            try:
+                await resources.async_update_item(res["id"], {"res_type": "module", "url": url})
+            except Exception as e:
+                _LOGGER.error(f"Failed to update Lovelace resource: {e}")
+            return
 
     _LOGGER.info(f"Registering Lovelace resource: {url}")
     try:
@@ -97,11 +122,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     await hass.async_add_executor_job(setup_frontend_files, hass)
 
     async def _register_resource(event: Event | None = None) -> None:
-        await register_lovelace_resource(
-            hass, f"/local/community/{DOMAIN}/whats-that-plane-map.js"
-        )
-        if hass.data.get("whats_that_plane_listener"):
-            hass.data.pop("whats_that_plane_listener")()
+        await register_lovelace_resource(hass, MAP_JS_URL)
+        # The once-listener removes itself when it fires; just drop the stale handle.
+        hass.data.pop("whats_that_plane_listener", None)
 
     if hass.state is CoreState.running:
         await _register_resource()
@@ -128,11 +151,11 @@ async def update_listener(hass: HomeAssistant, entry: ConfigEntry) -> None:
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     if len(hass.config_entries.async_entries(DOMAIN)) == 1:
         _LOGGER.info("Last entry for What's that plane?! being removed, cleaning up resources.")
-        await async_remove_lovelace_resource(hass, f"/local/community/{DOMAIN}/whats-that-plane-map.js")
+        await async_remove_lovelace_resource(hass, MAP_JS_URL)
         await hass.async_add_executor_job(remove_frontend_files, hass)
 
-    if hass.data.get("whats_that_plane_listener"):
-        hass.data.pop("whats_that_plane_listener")()
+    if listener := hass.data.pop("whats_that_plane_listener", None):
+        listener()
 
     unload_ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
     if unload_ok:
@@ -151,7 +174,10 @@ async def async_remove_lovelace_resource(hass: HomeAssistant, url: str):
     lovelace = hass.data.get("lovelace")
     if lovelace and hasattr(lovelace, "resources"):
         resources = lovelace.resources
-        resource_to_remove = next((res for res in resources.async_items() if res["url"] == url), None)
+        base_path = url.split("?")[0]
+        resource_to_remove = next(
+            (res for res in resources.async_items() if res["url"].split("?")[0] == base_path), None
+        )
 
         if resource_to_remove:
             try:
@@ -179,6 +205,11 @@ class WhatsThatPlaneCoordinator(DataUpdateCoordinator):
         self.tracked_flights = {}
         self.landing_flights = {}
         self.historic_flights = []
+        self._feed_backoff_seconds = 0
+        self._feed_success_streak = 0
+        self.feed_backoff_until = 0.0
+        self.feed_status = "ok"
+        self.feed_error = None
 
         super().__init__(
             hass,
@@ -260,19 +291,49 @@ class WhatsThatPlaneCoordinator(DataUpdateCoordinator):
             distance_units = config.get("distance_units", "imperial (miles (mi))")
             altitude_units = config.get("altitude_units", "imperial (feet (ft))")
             speed_units = config.get("speed_units", "imperial (miles per hour (mph))")
+            exclude_ground = config.get("exclude_ground_traffic", False)
 
-            bounds = await self.hass.async_add_executor_job(
-                self.fr_api.get_bounds_by_point, your_latitude, your_longitude, radius_km
-            )
-            all_flights = await self.hass.async_add_executor_job(
-                self.fr_api.get_flights, None, bounds
-            )
+            if time.time() < self.feed_backoff_until:
+                # Paused after a failure: no request; unrefreshed flights age out via the hold rule.
+                return self._expire_flights(set(), hold_seconds)
+
+            try:
+                bounds = await self.hass.async_add_executor_job(
+                    self.fr_api.get_bounds_by_point, your_latitude, your_longitude, radius_km
+                )
+                all_flights = await self.hass.async_add_executor_job(
+                    self.fr_api.get_flights, None, bounds
+                )
+            except Exception as err:
+                self._feed_success_streak = 0
+                self._feed_backoff_seconds = min(
+                    max(self._feed_backoff_seconds * 2, FEED_BACKOFF_MIN_SECONDS), FEED_BACKOFF_MAX_SECONDS
+                )
+                self.feed_backoff_until = time.time() + self._feed_backoff_seconds
+                self.feed_status = "rate_limited" if "429" in str(err) else "error"
+                self.feed_error = str(err)[:200]
+                _LOGGER.warning(
+                    "Flight feed request failed, pausing requests for %ss: %s", self._feed_backoff_seconds, err
+                )
+                return self._expire_flights(set(), hold_seconds)
+
+            if self.feed_status != "ok":
+                _LOGGER.info("Flight feed recovered")
+            self._feed_success_streak += 1
+            if self._feed_success_streak >= FEED_BACKOFF_RESET_SUCCESSES:
+                self._feed_backoff_seconds = 0
+            self.feed_backoff_until = 0.0
+            self.feed_status = "ok"
+            self.feed_error = None
 
             all_flights_map = {flight.id: flight for flight in all_flights if flight.id}
             currently_visible_ids = set()
 
             for flight_id, flight in all_flights_map.items():
                 if flight.latitude is None or flight.longitude is None:
+                    continue
+
+                if exclude_ground and flight.on_ground == 1:
                     continue
 
                 flight_distance_km = geodesic((your_latitude, your_longitude), (flight.latitude, flight.longitude)).km
@@ -289,19 +350,29 @@ class WhatsThatPlaneCoordinator(DataUpdateCoordinator):
                 if self._is_within_fov(flight_bearing, config["facing_direction"], config["fov_cone"]):
                     currently_visible_ids.add(flight_id)
 
-                    if flight_id in self.landing_flights:
-                        flight_details = self.landing_flights[flight_id]["data"]
-                    elif flight_id in self.tracked_flights:
-                        flight_details = self.tracked_flights[flight_id]["data"]
-                    else:
-                        _LOGGER.debug(f"New flight in FOV: {flight_id}")
+                    # A flight lives in exactly one of tracked_flights / landing_flights.
+                    tracked = self.landing_flights.get(flight_id) or self.tracked_flights.get(flight_id)
+                    retry_at = tracked.get("retry_details_at") if tracked else None
+                    if tracked is None or (retry_at and time.time() >= retry_at):
+                        _LOGGER.debug(f"Fetching details for flight in FOV: {flight_id}")
                         try:
-                            flight_details = await self.hass.async_add_executor_job(self.fr_api.get_flight_details,
-                                                                                    flight)
-                        except (OSError, ValueError) as e:
+                            fetched = await self.hass.async_add_executor_job(self.fr_api.get_flight_details,
+                                                                             flight)
+                            next_retry = None
+                        except DETAILS_ERRORS as e:
                             _LOGGER.warning(f"Could not fetch details for {flight_id}: {e}")
-                            flight_details = {}
-                        self.tracked_flights[flight_id] = {"data": flight_details}
+                            fetched = {}
+                            next_retry = time.time() + DETAILS_RETRY_SECONDS
+                        if tracked is None:
+                            tracked = self.tracked_flights[flight_id] = {"data": fetched}
+                        elif fetched:
+                            fetched["trail"] = tracked["data"].get("trail", [])
+                            tracked["data"] = fetched
+                        if next_retry:
+                            tracked["retry_details_at"] = next_retry
+                        else:
+                            tracked.pop("retry_details_at", None)
+                    flight_details = tracked["data"]
 
                     flight_details['latitude'] = flight.latitude
                     flight_details['longitude'] = flight.longitude
@@ -350,11 +421,9 @@ class WhatsThatPlaneCoordinator(DataUpdateCoordinator):
                     dpath.util.new(flight_details, 'identification/callsign', flight.callsign)
 
                     origin_lat = dpath.util.get(flight_details, ORIGIN_LATITUDE, default=None)
-                    origin_lng =
-                                       dpath.util.get(flight_details, ORIGIN_LONGITUDE, default=None)
+                    origin_lng = dpath.util.get(flight_details, ORIGIN_LONGITUDE, default=None)
                     dest_lat = dpath.util.get(flight_details, DESTINATION_LATITUDE, default=None)
-                    dest_lng =
-                                            dpath.util.get(flight_details, DESTINATION_LONGITUDE, default=None)
+                    dest_lng = dpath.util.get(flight_details, DESTINATION_LONGITUDE, default=None)
                     total_distance, distance_traveled, progress_percent = 0, 0, 0
 
                     if origin_lat is not None and origin_lng is not None and dest_lat is not None and dest_lng is not None and flight.latitude is not None and flight.longitude is not None:
@@ -377,11 +446,8 @@ class WhatsThatPlaneCoordinator(DataUpdateCoordinator):
                     flight_details['total_distance'] = total_distance
                     flight_details['distance_traveled'] = distance_traveled
                     flight_details['progress_percent'] = progress_percent
-                    
-                    if flight_id in self.landing_flights:
-                        self.landing_flights[flight_id]["last_seen"] = time.time()
-                    elif flight_id in self.tracked_flights:
-                        self.tracked_flights[flight_id]["last_seen"] = time.time()
+
+                    tracked["last_seen"] = time.time()
 
                     flight_details['is_landing'] = self._is_landing_flight(
                         flight_details, flight_bearing
@@ -397,27 +463,28 @@ class WhatsThatPlaneCoordinator(DataUpdateCoordinator):
                         if not self.landing_flights[flight_id]["data"].get("is_landing", False):
                             self.tracked_flights[flight_id] = self.landing_flights.pop(flight_id)
 
-            expired_flight_ids = []
-            all_active = {**self.tracked_flights, **self.landing_flights}
-            for flight_id, flight_info in all_active.items():
-                if flight_id not in currently_visible_ids:
-                    if time.time() - flight_info.get("last_seen", 0) > hold_seconds:
-                        _LOGGER.debug(f"Flight {flight_id} has expired and will be removed.")
-                        expired_flight_ids.append(flight_id)
-
-            historic_max_count = self._config.get("historic_flights_max_count", 0)
-            for flight_id in expired_flight_ids:
-                if flight_id in self.tracked_flights:
-                    self.historic_flights.insert(0, self.tracked_flights[flight_id])
-                    del self.tracked_flights[flight_id]
-                elif flight_id in self.landing_flights:
-                    self.historic_flights.insert(0, self.landing_flights[flight_id])
-                    del self.landing_flights[flight_id]
-
-            if len(self.historic_flights) > historic_max_count:
-                self.historic_flights = self.historic_flights[:historic_max_count]
-
-            return list(self.tracked_flights.values())
+            return self._expire_flights(currently_visible_ids, hold_seconds)
 
         except Exception as err:
             raise UpdateFailed(f"Error communicating with API: {err}")
+
+    def _expire_flights(self, currently_visible_ids, hold_seconds):
+        expired_flight_ids = []
+        all_active = {**self.tracked_flights, **self.landing_flights}
+        for flight_id, flight_info in all_active.items():
+            if flight_id not in currently_visible_ids:
+                if time.time() - flight_info.get("last_seen", 0) > hold_seconds:
+                    _LOGGER.debug(f"Flight {flight_id} has expired and will be removed.")
+                    expired_flight_ids.append(flight_id)
+
+        historic_max_count = self._config.get("historic_flights_max_count", 0)
+        for flight_id in expired_flight_ids:
+            if flight_id in self.tracked_flights:
+                self.historic_flights.insert(0, self.tracked_flights.pop(flight_id))
+            elif flight_id in self.landing_flights:
+                self.historic_flights.insert(0, self.landing_flights.pop(flight_id))
+
+        if len(self.historic_flights) > historic_max_count:
+            self.historic_flights = self.historic_flights[:historic_max_count]
+
+        return list(self.tracked_flights.values())

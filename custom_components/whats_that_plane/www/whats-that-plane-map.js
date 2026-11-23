@@ -474,15 +474,6 @@ class WhatsThatPlaneMap extends HTMLElement {
             this._updateAllElementsOpacity();
         });
 
-
-        const tileUrl = 'https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png';
-        const attribution = '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>';
-
-        L.tileLayer(tileUrl, {
-            attribution: attribution,
-            maxZoom: 18,
-        }).addTo(this._map);
-
         this._map.whenReady(() => {
             loaderElement.style.display = 'none';
             mapElement.style.visibility = 'visible';
@@ -605,6 +596,25 @@ class WhatsThatPlaneMap extends HTMLElement {
   drawStaticElements() {
     const config = this._state.attributes.config;
     if (!config) return;
+
+    const cartoApiKey = config.carto_api_key?.trim();
+
+    // CARTO basemaps now require a key; without one fall back to standard OpenStreetMap tiles.
+    const tileUrl = cartoApiKey
+        ? `https://basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png?key=${encodeURIComponent(cartoApiKey)}`
+        : 'https://tile.openstreetmap.org/{z}/{x}/{y}.png';
+
+    const attribution = cartoApiKey
+        ? '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>'
+        : '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors';
+
+    L.tileLayer(tileUrl, {
+        attribution: attribution,
+        maxZoom: 18,
+        // HA pages send no Referer (meta referrer + no-referrer header); OSM's tile policy blocks
+        // requests without one, so send just the origin for tile images.
+        referrerPolicy: 'strict-origin-when-cross-origin',
+    }).addTo(this._map);
 
     this.staticElementsDrawn = true;
     

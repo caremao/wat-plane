@@ -7,6 +7,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
+from homeassistant.util import dt as dt_util
 
 from .const import DOMAIN, COUNTRY_CODE_MAP, TIMEZONE_ABBREVIATION_MAP
 
@@ -67,6 +68,9 @@ async def async_setup_entry(
 
 
 class WhatsThatPlaneSensor(CoordinatorEntity, SensorEntity):
+    # Flight payloads exceed the recorder's 16 KB attribute cap; dashboards read live state only.
+    _unrecorded_attributes = frozenset({"config", "flights", "historic_flights", "landing_flights"})
+
     def __init__(self, coordinator):
         super().__init__(coordinator)
         self._attr_name = "Visible Flights"
@@ -262,12 +266,13 @@ class WhatsThatPlaneSensor(CoordinatorEntity, SensorEntity):
 
     def update_sensor_data(self):
         visible_flights = self.coordinator.data or []
-        self._attr_native_value = len(visible_flights)
+        landing_flights = self.coordinator.landing_flights or {}
+        # Landing flights are kept apart from `flights` but are still visible flights.
+        self._attr_native_value = len(visible_flights) + len(landing_flights)
 
         flights_data = [self._format_flight_data(flight) for flight in visible_flights if flight]
         historic_flights = self.coordinator.historic_flights or []
         historic_flights_data = [self._format_flight_data(flight) for flight in historic_flights if flight]
-        landing_flights = self.coordinator.landing_flights or {}
         landing_flights_data = [self._format_flight_data(flight) for flight in landing_flights.values() if flight]
 
         config = self.coordinator.config
@@ -277,6 +282,7 @@ class WhatsThatPlaneSensor(CoordinatorEntity, SensorEntity):
             "radius_km": config.get("radius_km"),
             "facing_direction": config.get("facing_direction"),
             "fov_cone": config.get("fov_cone"),
+            "carto_api_key": config.get("carto_api_key", ""),
             "distance_units": config.get("distance_units", "metric"),
             "altitude_units": config.get("altitude_units", "imperial"),
             "speed_units": config.get("speed_units", "imperial"),
@@ -285,9 +291,14 @@ class WhatsThatPlaneSensor(CoordinatorEntity, SensorEntity):
             "approach_cone_width": config.get("approach_cone_width", 30),
         }
 
+        retry_at = getattr(self.coordinator, "feed_backoff_until", 0)
         self._attr_extra_state_attributes = {
             "config": config_attributes,
             "flights": flights_data,
             "historic_flights": historic_flights_data,
             "landing_flights": landing_flights_data,
+            # "ok" | "rate_limited" | "error"; while not ok, FR24 requests pause until feed_retry_at.
+            "feed_status": getattr(self.coordinator, "feed_status", "ok"),
+            "feed_error": getattr(self.coordinator, "feed_error", None),
+            "feed_retry_at": dt_util.utc_from_timestamp(retry_at).isoformat() if retry_at else None,
         }
